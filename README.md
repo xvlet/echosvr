@@ -9,8 +9,12 @@ It echoes requests and can be dynamically configured via `config.yml` to return 
 # Run locally
 make run
 
-# Run via Docker
-docker run -p 58080:58080 -p 58081:58081 -v ./config.yml:/app/config.yml ghcr.io/xvlet/echosvr:latest
+# Run via Docker (with default config)
+docker run -p 58080:58080 -p 58081:58081 ghcr.io/xvlet/echosvr:latest
+
+# Run via Docker (with custom config override)
+# Note: You must have a config.yml file in your current directory
+docker run -p 58080:58080 -p 58081:58081 -v $(pwd)/config.yml:/app/config.yml ghcr.io/xvlet/echosvr:latest
 
 # Configuration
 # Edit config.yml to add your mock routes.
