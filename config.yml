@@ -1,0 +1,105 @@
+# ==============================================================================
+# ECHOSVR CONFIGURATION
+# ------------------------------------------------------------------------------
+# Defines the echo server configuration.
+#
+# [server]
+#   - port                  : Port on which the HTTP echo server listens (e.g. 58080)
+#   - websocket             : WebSocket server configuration
+#     - port                : WebSocket server port (uses HTTP port if not set or same)
+#     - paths               : List of WebSocket URL paths (e.g., ["/ws", "/ws/test"])
+#   - transaction_id_header : Header name used for tracking transaction IDs in logs
+#   - logging               : Logging configuration (file rotation, max size, etc.)
+#   - routes                : List of routes to handle with specific behaviors
+# ==============================================================================
+
+server:
+  port: 58080
+  
+  websocket:
+    port: 58081
+    paths:
+      - "/ws"
+      - "/ws/test"
+      
+  transaction_id_header: "tran_gid"
+  
+  logging:
+    use: true
+    file_name: "logs/echo.log"
+    max_size_mb: 100
+    max_history: 3
+    level: "debug"
+    rotation_time: 24
+    pattern: "[%D:23][%G:36][%L:5][%C:14,5] %M"
+
+  # ==============================================================================
+  # DYNAMIC ROUTES CONFIGURATION
+  # ------------------------------------------------------------------------------
+  # Define custom routing behaviors below. 
+  # If a route is not defined here, the server will default to echoing the request 
+  # body back to the client with a 200 OK status.
+  #
+  # Supported fields:
+  #   - path             : The URL path (e.g., "/api/v1/users")
+  #   - method           : HTTP Method (e.g., "GET", "POST,PUT"). Use "ANY" or omit for all.
+  #   - response_headers : Custom HTTP headers to inject into the response
+  #   - status_code      : Custom HTTP status code (Default: 200)
+  #   - response_body    : Hardcoded response body text/JSON
+  #   - delay_ms         : Artificially delay the response by milliseconds
+  # ==============================================================================
+  routes:
+
+    # -----------------------------------------------------
+    # Example 1: Standard Echo Endpoint (Explicitly defined)
+    # -----------------------------------------------------
+    - path: "/api/echo"
+      method: "POST,PUT,PATCH"
+      # No custom body/status defined, so it will echo the request payload back
+
+    # -----------------------------------------------------
+    # Example 2: Forced Error Response
+    # -----------------------------------------------------
+    - path: "/api/error"
+      method: "GET,POST"
+      status_code: 500
+      response_headers:
+        "X-Error-Code": "ERR-999"
+      response_body: '{"error": "Internal Server Error Simulation"}'
+
+    # -----------------------------------------------------
+    # Example 3: Simulated Latency (e.g., for Timeout Testing)
+    # -----------------------------------------------------
+    - path: "/api/slow"
+      method: "GET"
+      status_code: 200
+      response_body: "This response was delayed by 500ms"
+      delay_ms: 500
+
+    # -----------------------------------------------------
+    # Example 4: Custom Headers and JSON Response
+    # -----------------------------------------------------
+    - path: "/api/auth/login"
+      method: "POST"
+      status_code: 200
+      response_headers:
+        "Content-Type": "application/json"
+        "Authorization": "Bearer mock-token-12345"
+      response_body: '{"status": "success", "userId": "mock_user"}'
+
+    # -----------------------------------------------------
+    # VJM Internal Test Routes (Legacy/Compatibility)
+    # -----------------------------------------------------
+    - path: "/test/api/login"
+      method: "POST"
+    - path: "/test/api/profile"
+      method: "GET,DELETE,PUT,PATCH"
+    - path: "/test/force/response"
+      method: "POST"
+      status_code: 500
+      response_headers:
+        "force-header-sample-1": "12345"
+      response_body: "Force 500 Error 12345"
+    - path: "/test/preprocessor/timeout"
+      method: "GET"
+      delay_ms: 50
