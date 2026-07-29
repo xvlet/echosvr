@@ -51,41 +51,15 @@ server:
   routes:
 
     # -----------------------------------------------------
-    # Example 1: Standard Echo Endpoint (Explicitly defined)
+    # Example: Dynamic Route with Multiple Methods and Custom Response
     # -----------------------------------------------------
-    - path: "/api/echo"
-      method: "POST,PUT,PATCH"
-      # No custom body/status defined, so it will echo the request payload back
-
-    # -----------------------------------------------------
-    # Example 2: Forced Error Response
-    # -----------------------------------------------------
-    - path: "/api/error"
-      method: "GET,POST"
-      status_code: 500
-      response_headers:
-        "X-Error-Code": "ERR-999"
-      response_body: '{"error": "Internal Server Error Simulation"}'
-
-    # -----------------------------------------------------
-    # Example 3: Simulated Latency (e.g., for Timeout Testing)
-    # -----------------------------------------------------
-    - path: "/api/slow"
-      method: "GET"
+    - path: "/api/mock"
+      method: "GET,POST,PUT"
       status_code: 200
-      response_body: "This response was delayed by 500ms"
       delay_ms: 500
-
-    # -----------------------------------------------------
-    # Example 4: Custom Headers and JSON Response
-    # -----------------------------------------------------
-    - path: "/api/auth/login"
-      method: "POST"
-      status_code: 200
       response_headers:
-        "Content-Type": "application/json"
-        "Authorization": "Bearer mock-token-12345"
-      response_body: '{"status": "success", "userId": "mock_user"}'
+        "X-Mock-Status": "Active"
+      response_body: '{"message": "This is a dynamic mock response delayed by 500ms"}'
 
     # -----------------------------------------------------
     # VJM Internal Test Routes (Legacy/Compatibility)
