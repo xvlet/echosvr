@@ -66,8 +66,21 @@ func main() {
 	}
 	defer logger.Sync()
 
+	var startupReqID string
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err == nil {
+		b[6] = (b[6] & 0x0f) | 0x40
+		b[8] = (b[8] & 0x3f) | 0x80
+		startupReqID = fmt.Sprintf("%08x-%04x-%04x-%04x-%012x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:])
+	} else {
+		startupReqID = "startup"
+	}
+
 	if logger.S != nil {
-		logger.S.Infof("Loaded configuration: port=%d, routes=%d", config.Server.Port, len(config.Server.Routes))
+		logger.WithReqID(startupReqID).Infof("\x1b[38;5;45m▶ HTTP Server\x1b[0m")
+		logger.WithReqID(startupReqID).Infof("Loaded configuration: port=%d, routes=%d", config.Server.Port, len(config.Server.Routes))
+	} else {
+		fmt.Println("\x1b[38;5;45m▶ HTTP Server\x1b[0m")
 	}
 
 	// Create Echo instance
@@ -104,9 +117,9 @@ func main() {
 		for _, r := range config.Server.Routes {
 			route := r // localized copy for closure
 			if logger.S != nil {
-				logger.S.Infof("Registering route: [%s] %s (ResponseHeaders: %v)", route.Method, route.Path, route.ResponseHeaders)
+				logger.WithReqID(startupReqID).Infof("Registering route: [%s] %s", route.Method, route.Path)
 			} else {
-				fmt.Printf("Registering route: [%s] %s (ResponseHeaders: %v)\n", route.Method, route.Path, route.ResponseHeaders)
+				fmt.Printf("Registering route: [%s] %s\n", route.Method, route.Path)
 			}
 
 			methods := strings.Split(route.Method, ",")
@@ -138,11 +151,23 @@ func main() {
 	}
 
 	// Always provide a catch-all fallback for undefined routes
+	if logger.S != nil {
+		logger.WithReqID(startupReqID).Infof("Registering wildcard route: \x1b[93m[ANY] /* (Catch-all)\x1b[0m")
+	} else {
+		fmt.Println("Registering wildcard route: \x1b[93m[ANY] /* (Catch-all)\x1b[0m")
+	}
 	e.Any("/*", func(c echo.Context) error {
 		return handleAny(c, config.Server.TransactionIDHeader, RouteConfig{})
 	})
 
 	// WebSocket Echo Route
+	if logger.S != nil {
+		logger.WithReqID(startupReqID).Infof("")
+		logger.WithReqID(startupReqID).Infof("\x1b[38;5;45m▶ WebSocket Server\x1b[0m")
+	} else {
+		fmt.Println()
+		fmt.Println("\x1b[38;5;45m▶ WebSocket Server\x1b[0m")
+	}
 	wsPaths := config.Server.Websocket.Paths
 	wsHandler := echo.WrapHandler(websocket.Handler(func(ws *websocket.Conn) {
 		_, _ = io.Copy(ws, ws)
@@ -157,14 +182,16 @@ func main() {
 		wsEcho := echo.New()
 		wsEcho.HideBanner = true
 		wsEcho.HidePort = true
+		if logger.S != nil {
+			logger.WithReqID(startupReqID).Infof("Loaded configuration: port=%d, routes=%d", wsPort, len(wsPaths))
+		}
 		for _, wsPath := range wsPaths {
+			if logger.S != nil {
+				logger.WithReqID(startupReqID).Infof("Registering route: [%s]", wsPath)
+			}
 			wsEcho.GET(wsPath, wsHandler)
 		}
 		go func() {
-			if logger.S != nil {
-				logger.S.Infof("Starting WebSocket server on port: %d, paths: %v", wsPort, wsPaths)
-			}
-
 			// Output directly with the exact same format and color (ANSI Green) as the Echo framework
 			fmt.Printf("⇨ websocket server started on \x1b[32m[::]:%d\x1b[0m\n", wsPort)
 
@@ -173,11 +200,16 @@ func main() {
 	} else {
 		// Run WebSocket on the same HTTP port
 		if logger.S != nil {
-			logger.S.Infof("Starting WebSocket server on HTTP port: %d, paths: %v", config.Server.Port, wsPaths)
+			logger.WithReqID(startupReqID).Infof("Loaded configuration: port=%d, routes=%d", config.Server.Port, len(wsPaths))
 		} else {
-			fmt.Printf("Starting WebSocket server on HTTP port: %d, paths: %v\n", config.Server.Port, wsPaths)
+			fmt.Printf("Loaded configuration: port=%d, routes=%d\n", config.Server.Port, len(wsPaths))
 		}
 		for _, wsPath := range wsPaths {
+			if logger.S != nil {
+				logger.WithReqID(startupReqID).Infof("Registering route: [%s]", wsPath)
+			} else {
+				fmt.Printf("Registering route: [%s]\n", wsPath)
+			}
 			e.GET(wsPath, wsHandler)
 		}
 	}
