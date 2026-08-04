@@ -7,7 +7,7 @@ before:
 
 builds:
   - id: echosvr
-    main: ./main.go
+    main: .
     binary: echosvr
     env:
       - CGO_ENABLED=0
@@ -22,7 +22,7 @@ builds:
       - -s -w
 
   - id: echosvr-aix
-    main: ./main.go
+    main: .
     binary: echosvr
     env:
       - CGO_ENABLED=0
