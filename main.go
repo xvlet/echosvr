@@ -1,13 +1,16 @@
 package main
 
 import (
+	"context"
 	"crypto/rand"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/labstack/echo/v4"
@@ -85,6 +88,7 @@ func main() {
 
 	// Create Echo instance
 	e := echo.New()
+	e.HideBanner = true
 
 	// Middleware
 	e.Use(middleware.RequestIDWithConfig(middleware.RequestIDConfig{
@@ -112,7 +116,6 @@ func main() {
 	}))
 	e.Use(middleware.Recover())
 
-	// Dynamic Routes from Config
 	if len(config.Server.Routes) > 0 {
 		for _, r := range config.Server.Routes {
 			route := r // localized copy for closure
@@ -127,15 +130,12 @@ func main() {
 				m = strings.TrimSpace(m)
 
 				// Intercept for custom handlers
-				if route.Path == "/test/api/login" && m == "POST" {
-					e.POST(route.Path, custom.LoginHandler)
-					continue
-				}
-				if route.Path == "/test/api/profile" && m == "GET" {
-					e.GET(route.Path, custom.ProfileHandler)
+				if h := custom.GetCustomHandler(m, route.Path); h != nil {
+					e.Add(m, route.Path, h)
 					continue
 				}
 
+				// Dynamic Routes from Config
 				switch m {
 				case "", "ANY", "*":
 					e.Any(route.Path, func(c echo.Context) error {
@@ -169,9 +169,26 @@ func main() {
 		fmt.Println("\x1b[38;5;45m▶ WebSocket Server\x1b[0m")
 	}
 	wsPaths := config.Server.Websocket.Paths
-	wsHandler := echo.WrapHandler(websocket.Handler(func(ws *websocket.Conn) {
-		_, _ = io.Copy(ws, ws)
-	}))
+	wsServer := websocket.Server{
+		Handler: websocket.Handler(func(ws *websocket.Conn) {
+			for {
+				var msg string
+				if err := websocket.Message.Receive(ws, &msg); err != nil {
+					fmt.Printf("[WS] Disconnected or error: %v\n", err)
+					break
+				}
+				fmt.Printf("[WS] Received payload (len %d): %q\n", len(msg), msg)
+				if err := websocket.Message.Send(ws, msg); err != nil {
+					break
+				}
+			}
+		}),
+		Handshake: func(config *websocket.Config, req *http.Request) error {
+			// Accept all origins to prevent 403 Forbidden on cross-origin/remote requests
+			return nil
+		},
+	}
+	wsHandler := echo.WrapHandler(wsServer)
 	if len(wsPaths) == 0 {
 		wsPaths = []string{"/ws"} // default fallback
 	}
@@ -195,7 +212,25 @@ func main() {
 			// Output directly with the exact same format and color (ANSI Green) as the Echo framework
 			fmt.Printf("⇨ websocket server started on \x1b[32m[::]:%d\x1b[0m\n", wsPort)
 
-			wsEcho.Logger.Fatal(wsEcho.Start(fmt.Sprintf(":%d", wsPort)))
+			lc := net.ListenConfig{
+				Control: func(network, address string, c syscall.RawConn) error {
+					var err error
+					_ = c.Control(func(fd uintptr) {
+						err = syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, syscall.SO_REUSEADDR, 1)
+						if err != nil {
+							return
+						}
+						err = syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, 15, 1) // SO_REUSEPORT
+					})
+					return err
+				},
+			}
+			l, err := lc.Listen(context.Background(), "tcp", fmt.Sprintf(":%d", wsPort))
+			if err != nil {
+				wsEcho.Logger.Fatal(err)
+			}
+			wsEcho.Listener = l
+			wsEcho.Logger.Fatal(wsEcho.StartServer(wsEcho.Server))
 		}()
 	} else {
 		// Run WebSocket on the same HTTP port
@@ -216,7 +251,25 @@ func main() {
 
 	// Start server
 	address := fmt.Sprintf(":%d", config.Server.Port)
-	e.Logger.Fatal(e.Start(address))
+	lc := net.ListenConfig{
+		Control: func(network, address string, c syscall.RawConn) error {
+			var err error
+			_ = c.Control(func(fd uintptr) {
+				err = syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, syscall.SO_REUSEADDR, 1)
+				if err != nil {
+					return
+				}
+				err = syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, 15, 1) // SO_REUSEPORT
+			})
+			return err
+		},
+	}
+	l, err := lc.Listen(context.Background(), "tcp", address)
+	if err != nil {
+		e.Logger.Fatal(err)
+	}
+	e.Listener = l
+	e.Logger.Fatal(e.StartServer(e.Server))
 }
 
 // reflectHeaders copies request headers to response headers, excluding hop-by-hop ones.
