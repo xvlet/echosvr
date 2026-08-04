@@ -77,3 +77,5 @@ server:
     - path: "/test/preprocessor/timeout"
       method: "GET"
       delay_ms: 50
+    - path: "/test/api/sse"
+      method: "GET"
