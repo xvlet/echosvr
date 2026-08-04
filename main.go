@@ -216,11 +216,7 @@ func main() {
 				Control: func(network, address string, c syscall.RawConn) error {
 					var err error
 					_ = c.Control(func(fd uintptr) {
-						err = syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, syscall.SO_REUSEADDR, 1)
-						if err != nil {
-							return
-						}
-						err = syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, 15, 1) // SO_REUSEPORT
+						err = setReusePort(fd)
 					})
 					return err
 				},
@@ -255,11 +251,7 @@ func main() {
 		Control: func(network, address string, c syscall.RawConn) error {
 			var err error
 			_ = c.Control(func(fd uintptr) {
-				err = syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, syscall.SO_REUSEADDR, 1)
-				if err != nil {
-					return
-				}
-				err = syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, 15, 1) // SO_REUSEPORT
+				err = setReusePort(fd)
 			})
 			return err
 		},
