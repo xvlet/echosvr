@@ -5,7 +5,7 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o echosvr main.go
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o echosvr .
 
 FROM alpine:latest
 WORKDIR /app
