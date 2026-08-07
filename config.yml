@@ -18,9 +18,26 @@ server:
   
   websocket:
     port: 58081
+    # Catch-all list of URL paths to listen on (e.g., ["/ws", "/ws/test"]).
     paths:
       - "/ws"
       - "/ws/test"
+      
+    # Define custom behavior for specific WebSocket routes.
+    routes:
+      # Simulate a handshake rejection (401, 403, etc.)
+      - path: "/ws/mock/auth"
+        handshake_status_code: 401
+      # Send a message immediately upon connection
+      - path: "/ws/mock/welcome"
+        initial_message: '{"type":"welcome","message":"Connected to Echosvr!"}'
+      # Simulate a delayed response for each message (ms)
+      - path: "/ws/mock/delay"
+        delay_ms: 500
+      # Automatically disconnect after a certain number of messages or time (seconds)
+      - path: "/ws/mock/disconnect"
+        disconnect_after_msgs: 3
+        disconnect_after_sec: 10
       
   transaction_id_header: "tran_gid"
   

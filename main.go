@@ -32,9 +32,23 @@ type RouteConfig struct {
 	DelayMs         int               `yaml:"delay_ms"`
 }
 
+type WsRouteConfig struct {
+	Path                string `yaml:"path"`
+	HandshakeStatusCode int    `yaml:"handshake_status_code"`
+	InitialMessage      string `yaml:"initial_message"`
+	DelayMs             int    `yaml:"delay_ms"`
+	DisconnectAfterSec  int    `yaml:"disconnect_after_sec"`
+	DisconnectAfterMsgs int    `yaml:"disconnect_after_msgs"`
+}
+
+func (r *WsRouteConfig) ShouldRejectHandshake() bool {
+	return r.HandshakeStatusCode > 0 && r.HandshakeStatusCode != 200 && r.HandshakeStatusCode != 101
+}
+
 type WebsocketConfig struct {
-	Port  int      `yaml:"port"`
-	Paths []string `yaml:"paths"`
+	Port   int             `yaml:"port"`
+	Paths  []string        `yaml:"paths"`
+	Routes []WsRouteConfig `yaml:"routes"`
 }
 
 type Config struct {
@@ -150,17 +164,7 @@ func main() {
 		}
 	}
 
-	// Always provide a catch-all fallback for undefined routes
-	if logger.S != nil {
-		logger.WithReqID(startupReqID).Infof("Registering wildcard route: \x1b[93m[ANY] /* (Catch-all)\x1b[0m")
-	} else {
-		fmt.Println("Registering wildcard route: \x1b[93m[ANY] /* (Catch-all)\x1b[0m")
-	}
-	e.Any("/*", func(c echo.Context) error {
-		return handleAny(c, config.Server.TransactionIDHeader, RouteConfig{})
-	})
-
-	// WebSocket Echo Route
+	// WebSocket Echo Route setup (Moved up for catch-all)
 	if logger.S != nil {
 		logger.WithReqID(startupReqID).Infof("")
 		logger.WithReqID(startupReqID).Infof("\x1b[38;5;45m▶ WebSocket Server\x1b[0m")
@@ -169,26 +173,15 @@ func main() {
 		fmt.Println("\x1b[38;5;45m▶ WebSocket Server\x1b[0m")
 	}
 	wsPaths := config.Server.Websocket.Paths
-	wsServer := websocket.Server{
-		Handler: websocket.Handler(func(ws *websocket.Conn) {
-			for {
-				var msg string
-				if err := websocket.Message.Receive(ws, &msg); err != nil {
-					fmt.Printf("[WS] Disconnected or error: %v\n", err)
-					break
-				}
-				fmt.Printf("[WS] Received payload (len %d): %q\n", len(msg), msg)
-				if err := websocket.Message.Send(ws, msg); err != nil {
-					break
-				}
-			}
-		}),
-		Handshake: func(config *websocket.Config, req *http.Request) error {
-			// Accept all origins to prevent 403 Forbidden on cross-origin/remote requests
-			return nil
-		},
+
+	// Create a map for WS routes for fast lookup
+	wsRouteMap := make(map[string]*WsRouteConfig)
+	for i := range config.Server.Websocket.Routes {
+		r := &config.Server.Websocket.Routes[i]
+		wsRouteMap[r.Path] = r
 	}
-	wsHandler := echo.WrapHandler(wsServer)
+
+	wsHandler := buildWsEchoHandler(wsRouteMap, config.Server.TransactionIDHeader)
 	if len(wsPaths) == 0 {
 		wsPaths = []string{"/ws"} // default fallback
 	}
@@ -200,16 +193,21 @@ func main() {
 		wsEcho.HideBanner = true
 		wsEcho.HidePort = true
 		if logger.S != nil {
-			logger.WithReqID(startupReqID).Infof("Loaded configuration: port=%d, routes=%d", wsPort, len(wsPaths))
+			logger.WithReqID(startupReqID).Infof("Loaded configuration: port=%d, explicit_routes=%d", wsPort, len(wsPaths))
 		}
 		for _, wsPath := range wsPaths {
 			if logger.S != nil {
-				logger.WithReqID(startupReqID).Infof("Registering route: [%s]", wsPath)
+				logger.WithReqID(startupReqID).Infof("Registering explicit WS route: [%s]", wsPath)
 			}
 			wsEcho.GET(wsPath, wsHandler)
 		}
+		// Register WS Catch-all on the separate port
+		if logger.S != nil {
+			logger.WithReqID(startupReqID).Infof("Registering wildcard WS route: \x1b[93m[GET] /* (Catch-all WS)\x1b[0m")
+		}
+		wsEcho.GET("/*", wsHandler)
+
 		go func() {
-			// Output directly with the exact same format and color (ANSI Green) as the Echo framework
 			fmt.Printf("⇨ websocket server started on \x1b[32m[::]:%d\x1b[0m\n", wsPort)
 
 			lc := net.ListenConfig{
@@ -231,19 +229,36 @@ func main() {
 	} else {
 		// Run WebSocket on the same HTTP port
 		if logger.S != nil {
-			logger.WithReqID(startupReqID).Infof("Loaded configuration: port=%d, routes=%d", config.Server.Port, len(wsPaths))
+			logger.WithReqID(startupReqID).Infof("Loaded configuration: port=%d, explicit_routes=%d", config.Server.Port, len(wsPaths))
 		} else {
-			fmt.Printf("Loaded configuration: port=%d, routes=%d\n", config.Server.Port, len(wsPaths))
+			fmt.Printf("Loaded configuration: port=%d, explicit_routes=%d\n", config.Server.Port, len(wsPaths))
 		}
 		for _, wsPath := range wsPaths {
 			if logger.S != nil {
-				logger.WithReqID(startupReqID).Infof("Registering route: [%s]", wsPath)
+				logger.WithReqID(startupReqID).Infof("Registering explicit WS route: [%s]", wsPath)
 			} else {
-				fmt.Printf("Registering route: [%s]\n", wsPath)
+				fmt.Printf("Registering explicit WS route: [%s]\n", wsPath)
 			}
 			e.GET(wsPath, wsHandler)
 		}
 	}
+
+	// Always provide a catch-all fallback for undefined routes
+	if logger.S != nil {
+		logger.WithReqID(startupReqID).Infof("Registering wildcard route: \x1b[93m[ANY] /* (Catch-all HTTP/WS)\x1b[0m")
+	} else {
+		fmt.Println("Registering wildcard route: \x1b[93m[ANY] /* (Catch-all HTTP/WS)\x1b[0m")
+	}
+	e.Any("/*", func(c echo.Context) error {
+		req := c.Request()
+		// If WS is on the same port, handle WebSocket upgrades in the Catch-all
+		if (wsPort <= 0 || wsPort == config.Server.Port) &&
+			strings.Contains(strings.ToLower(req.Header.Get("Connection")), "upgrade") &&
+			strings.ToLower(req.Header.Get("Upgrade")) == "websocket" {
+			return wsHandler(c)
+		}
+		return handleAny(c, config.Server.TransactionIDHeader, RouteConfig{})
+	})
 
 	// Start server
 	address := fmt.Sprintf(":%d", config.Server.Port)
@@ -262,6 +277,83 @@ func main() {
 	}
 	e.Listener = l
 	e.Logger.Fatal(e.StartServer(e.Server))
+}
+
+func buildWsEchoHandler(wsRouteMap map[string]*WsRouteConfig, txIDHeader string) echo.HandlerFunc {
+	wsServer := websocket.Server{
+		Handler: buildWsHandler(wsRouteMap),
+		Handshake: func(config *websocket.Config, req *http.Request) error {
+			// Accept all origins to prevent 403 Forbidden on cross-origin/remote requests
+			return nil
+		},
+	}
+	baseWsHandler := echo.WrapHandler(wsServer)
+	return func(c echo.Context) error {
+		path := c.Request().URL.Path
+		route := wsRouteMap[path]
+
+		// Handle Handshake mock logic before passing to websocket.Server
+		if route != nil && route.ShouldRejectHandshake() {
+			reqId := getReqID(c, txIDHeader)
+			if logger.S != nil {
+				logger.WithReqID(reqId).Infof("WS Handshake Mock: %d", route.HandshakeStatusCode)
+			} else if os.Getenv("DEBUG") == "Y" {
+				fmt.Printf("WS Handshake Mock: %d\n", route.HandshakeStatusCode)
+			}
+			return c.String(route.HandshakeStatusCode, fmt.Sprintf("Mock WS Handshake Error: %d", route.HandshakeStatusCode))
+		}
+		return baseWsHandler(c)
+	}
+}
+
+func buildWsHandler(wsRouteMap map[string]*WsRouteConfig) websocket.Handler {
+	return func(ws *websocket.Conn) {
+		path := ws.Request().URL.Path
+		route := wsRouteMap[path]
+
+		if route != nil && route.InitialMessage != "" {
+			_ = websocket.Message.Send(ws, route.InitialMessage)
+		}
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		if route != nil && route.DisconnectAfterSec > 0 {
+			go func() {
+				select {
+				case <-time.After(time.Duration(route.DisconnectAfterSec) * time.Second):
+					fmt.Printf("[WS] Disconnect: after_sec=%d path=%s\n", route.DisconnectAfterSec, path)
+					_ = ws.Close()
+				case <-ctx.Done():
+				}
+			}()
+		}
+
+		msgCount := 0
+		for {
+			var msg string
+			if err := websocket.Message.Receive(ws, &msg); err != nil {
+				fmt.Printf("[WS] Disconnected or error: %v\n", err)
+				break
+			}
+			msgCount++
+			fmt.Printf("[WS] Received payload (len %d): %q\n", len(msg), msg)
+
+			if route != nil && route.DelayMs > 0 {
+				time.Sleep(time.Duration(route.DelayMs) * time.Millisecond)
+			}
+
+			if err := websocket.Message.Send(ws, msg); err != nil {
+				break
+			}
+
+			if route != nil && route.DisconnectAfterMsgs > 0 && msgCount >= route.DisconnectAfterMsgs {
+				fmt.Printf("[WS] Disconnect: after_msgs=%d path=%s\n", route.DisconnectAfterMsgs, path)
+				_ = ws.Close()
+				break
+			}
+		}
+	}
 }
 
 // reflectHeaders copies request headers to response headers, excluding hop-by-hop ones.
