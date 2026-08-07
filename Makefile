@@ -1,7 +1,7 @@
 # Makefile for echosvr
 
 APP_NAME = echosvr
-CMD_PATH = main.go
+CMD_PATH = .
 BASE_DIR = build
 VERSION ?= $(shell git describe --tags --abbrev=0 2>/dev/null || echo "dev")
 LDFLAGS = -w -s
