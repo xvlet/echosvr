@@ -13,6 +13,5 @@ func setReusePort(fd uintptr) error {
 	if err != nil {
 		return err
 	}
-	// 15 is SO_REUSEPORT on Linux/macOS
-	return syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, 15, 1)
+	return nil
 }
